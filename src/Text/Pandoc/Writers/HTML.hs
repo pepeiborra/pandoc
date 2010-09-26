@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-deprecations #-}
+{-# LANGUAGE ImplicitParams, RelaxedPolyRec #-}
 {-
 Copyright (C) 2006-2010 John MacFarlane <jgm@berkeley.edu>
 
@@ -40,7 +41,7 @@ import Network.HTTP ( urlEncode )
 import Numeric ( showHex )
 import Data.Char ( ord, toLower )
 import Data.List ( isPrefixOf, intersperse )
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( catMaybes, fromMaybe )
 import Control.Monad.State
 import Text.XHtml.Transitional hiding ( stringToHtml )
 import Text.TeXMath
@@ -92,6 +93,8 @@ pandocToHtml :: WriterOptions
              -> State WriterState (Html, [Html], Html, Maybe Html, Html, [(String,String)])
 pandocToHtml opts (Pandoc (Meta title' authors' date') blocks) = do
   let standalone = writerStandalone opts
+  let sects = hierarchicalize blocks
+  let ?sects = sects in do
   tit <- if standalone
             then inlineListToHtml opts title'
             else return noHtml
@@ -101,7 +104,6 @@ pandocToHtml opts (Pandoc (Meta title' authors' date') blocks) = do
   date <- if standalone
              then inlineListToHtml opts date'
              else return noHtml 
-  let sects = hierarchicalize blocks
   toc <- if writerTableOfContents opts 
             then tableOfContents opts sects
             else return Nothing
@@ -121,7 +123,7 @@ pandocToHtml opts (Pandoc (Meta title' authors' date') blocks) = do
                                            [endSlide]
   blocks' <- liftM toHtmlFromList $
               if writerSlideVariant opts `elem` [SlidySlides, S5Slides]
-                 then mapM (blockToHtml opts) slides
+                 then  mapM (blockToHtml opts) slides
                  else mapM (elementToHtml opts) sects
   st <- get
   let notes = reverse (stNotes st)
@@ -183,7 +185,7 @@ tableOfContents :: WriterOptions -> [Element] -> State WriterState (Maybe Html)
 tableOfContents _ [] = return Nothing
 tableOfContents opts sects = do
   let opts'        = opts { writerIgnoreNotes = True }
-  contents  <- mapM (elementToListItem opts') sects
+  contents  <- let ?sects=sects in mapM (elementToListItem opts') sects
   let tocList = catMaybes contents
   return $ if null tocList
               then Nothing
@@ -195,7 +197,7 @@ showSecNum = concat . intersperse "." . map show
 
 -- | Converts an Element to a list item for a table of contents,
 -- retrieving the appropriate identifier from state.
-elementToListItem :: WriterOptions -> Element -> State WriterState (Maybe Html)
+elementToListItem :: (?sects :: [Element]) => WriterOptions -> Element -> State WriterState (Maybe Html)
 elementToListItem _ (Blk _) = return Nothing
 elementToListItem opts (Sec _ num id' headerText subsecs) = do
   let sectnum = if writerNumberSections opts
@@ -210,7 +212,7 @@ elementToListItem opts (Sec _ num id' headerText subsecs) = do
   return $ Just $ (anchor ! [href ("#" ++ writerIdentifierPrefix opts ++ id')] $ txt) +++ subList
 
 -- | Convert an Element to Html.
-elementToHtml :: WriterOptions -> Element -> State WriterState Html
+elementToHtml :: (?sects :: [Element]) => WriterOptions -> Element -> State WriterState Html
 elementToHtml opts (Blk block) = blockToHtml opts block 
 elementToHtml opts (Sec level num id' title' elements) = do
   innerContents <- mapM (elementToHtml opts) elements
@@ -288,8 +290,9 @@ obfuscateString :: String -> String
 obfuscateString = concatMap obfuscateChar . decodeCharacterReferences
 
 -- | Convert Pandoc block element to HTML.
-blockToHtml :: WriterOptions -> Block -> State WriterState Html
+blockToHtml :: (?sects :: [Element]) => WriterOptions -> Block -> State WriterState Html
 blockToHtml _ Null = return $ noHtml 
+blockToHtml opts (Pragma TOC) = fromMaybe noHtml `liftM` tableOfContents opts ?sects
 blockToHtml opts (Plain lst) = inlineListToHtml opts lst
 blockToHtml opts (Para [Image txt (s,tit)]) = do
   img <- inlineToHtml opts (Image txt (s,tit))
@@ -395,7 +398,8 @@ blockToHtml opts (Table capt aligns widths headers rows') = do
                zipWithM (tableRowToHtml opts alignStrings) [1..] rows'
   return $ table $ captionDoc +++ coltags +++ head' +++ body'
 
-tableRowToHtml :: WriterOptions
+tableRowToHtml :: (?sects :: [Element]) =>
+                  WriterOptions
                -> [String]
                -> Int
                -> [[Block]]
@@ -418,7 +422,8 @@ alignmentToString alignment = case alignment of
                                  AlignCenter  -> "center"
                                  AlignDefault -> "left"
 
-tableItemToHtml :: WriterOptions
+tableItemToHtml :: (?sects :: [Element]) =>
+                   WriterOptions
                 -> (Html -> Html)
                 -> [Char]
                 -> [Block]
@@ -427,17 +432,17 @@ tableItemToHtml opts tag' align' item = do
   contents <- blockListToHtml opts item
   return $ tag' ! [align align'] $ contents
 
-blockListToHtml :: WriterOptions -> [Block] -> State WriterState Html
+blockListToHtml :: (?sects :: [Element]) => WriterOptions -> [Block] -> State WriterState Html
 blockListToHtml opts lst = 
   mapM (blockToHtml opts) lst >>= return . toHtmlFromList
 
 -- | Convert list of Pandoc inline elements to HTML.
-inlineListToHtml :: WriterOptions -> [Inline] -> State WriterState Html
+inlineListToHtml :: (?sects :: [Element]) => WriterOptions -> [Inline] -> State WriterState Html
 inlineListToHtml opts lst = 
   mapM (inlineToHtml opts) lst >>= return . toHtmlFromList
 
 -- | Convert Pandoc inline element to HTML.
-inlineToHtml :: WriterOptions -> Inline -> State WriterState Html
+inlineToHtml :: (?sects :: [Element]) => WriterOptions -> Inline -> State WriterState Html
 inlineToHtml opts inline =
   case inline of  
     (Str str)        -> return $ stringToHtml str
@@ -549,7 +554,7 @@ inlineToHtml opts inline =
                                            prefixedId opts ("fnref" ++ ref)] << ref
     (Cite _ il)  -> inlineListToHtml opts il
 
-blockListToNote :: WriterOptions -> String -> [Block] -> State WriterState Html
+blockListToNote :: (?sects :: [Element]) => WriterOptions -> String -> [Block] -> State WriterState Html
 blockListToNote opts ref blocks =
   -- If last block is Para or Plain, include the backlink at the end of
   -- that block. Otherwise, insert a new Plain block with the backlink.

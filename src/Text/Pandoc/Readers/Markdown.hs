@@ -273,7 +273,8 @@ block :: GenParser Char ParserState Block
 block = do
   st <- getState
   choice (if stateStrict st
-              then [ header
+              then [ pragma
+                   , header
                    , codeBlockIndented
                    , blockQuote
                    , hrule
@@ -284,6 +285,7 @@ block = do
                    , plain
                    , nullBlock ]
               else [ codeBlockDelimited
+                   , pragma
                    , header 
                    , table
                    , codeBlockIndented
@@ -298,6 +300,14 @@ block = do
                    , plain
                    , nullBlock ]) <?> "block"
 
+
+pragma = do
+  char '#'
+  it <- identifier
+  case it of
+    "TOC" -> return $ Pragma TOC
+    "TableOfContents" -> return $ Pragma TOC
+    _ -> fail $ "unknown pragma " ++ it
 --
 -- header blocks
 --

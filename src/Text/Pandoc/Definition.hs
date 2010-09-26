@@ -91,6 +91,10 @@ data Block
                             -- column headers (each a list of blocks), and
                             -- rows (each a list of lists of blocks)
     | Null                  -- ^ Nothing
+    | Pragma Pragma
+    deriving (Eq, Ord, Read, Show, Typeable, Data)
+
+data Pragma = TOC -- (Maybe [Element])
     deriving (Eq, Ord, Read, Show, Typeable, Data)
 
 -- | Type of quotation marks to use in Quoted inline.
